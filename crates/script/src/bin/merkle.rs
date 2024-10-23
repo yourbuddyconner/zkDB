@@ -22,9 +22,20 @@ pub const ZKDB_MERKLE_ELF: &[u8] = include_bytes!("../../../../elf/riscv32im-suc
 /// Commands for the Merkle client.
 #[derive(Subcommand, Debug)]
 enum Command {
-    Insert { key: String, value: String },
-    Query { key: String },
-    Prove { key: String },
+    Insert {
+        key: String,
+        value: String,
+        #[clap(long, help = "Generate and verify an SP1 proof")]
+        prove: bool,
+    },
+    Query {
+        key: String,
+        #[clap(long, help = "Generate and verify an SP1 proof")]
+        prove: bool,
+    },
+    Prove {
+        key: String,
+    },
 }
 
 /// The arguments for the command.
@@ -33,9 +44,6 @@ enum Command {
 struct Args {
     #[clap(subcommand)]
     command: Command,
-
-    #[clap(long, global = true, help = "Generate and verify an SP1 proof")]
-    prove: bool,
 }
 
 fn main() {
@@ -55,7 +63,7 @@ fn main() {
 
     // Prepare the command input.
     let command_json = match &args.command {
-        Command::Insert { key, value } => serde_json::json!({
+        Command::Insert { key, value, prove } => serde_json::json!({
             "command": "insert",
             "params": {
                 "key": key,
@@ -63,7 +71,7 @@ fn main() {
             },
             "state": state,
         }),
-        Command::Query { key } => serde_json::json!({
+        Command::Query { key, prove } => serde_json::json!({
             "command": "query",
             "params": {
                 "key": key,
@@ -115,16 +123,23 @@ fn main() {
             info!("Number of cycles: {}", report.total_instruction_count());
 
             // Generate and verify proof if requested
-            if args.prove {
-                info!("Generating and verifying proof...");
-                let (pk, vk) = client.setup(ZKDB_MERKLE_ELF);
-                let proof = client
-                    .prove(&pk, stdin)
-                    .run()
-                    .expect("Failed to generate proof");
-                println!("Proof generated successfully.");
-                client.verify(&proof, &vk).expect("Failed to verify proof");
-                println!("Proof verified successfully.");
+            match &args.command {
+                Command::Insert { prove, .. } | Command::Query { prove, .. } => {
+                    if *prove {
+                        info!("Generating and verifying proof...");
+                        let (pk, vk) = client.setup(ZKDB_MERKLE_ELF);
+                        let proof = client
+                            .prove(&pk, stdin.clone())
+                            .run()
+                            .expect("Failed to generate proof");
+                        println!("Proof generated successfully.");
+                        client.verify(&proof, &vk).expect("Failed to verify proof");
+                        println!("Proof verified successfully.");
+                    }
+                }
+                Command::Prove { key } => {
+                    // Handle additional logic for the Prove subcommand if necessary
+                }
             }
         }
         Err(e) => error!("Execution failed: {:?}", e),

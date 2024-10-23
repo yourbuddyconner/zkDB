@@ -51,6 +51,7 @@ fn run_program(client: &ProverClient, input_json: serde_json::Value) -> Value {
     let mut stdin = SP1Stdin::new();
     stdin.write(&command_str);
 
+    // Update the ELF file path
     let zkdb_merkle_elf = include_bytes!("../../../elf/riscv32im-succinct-zkvm-elf");
 
     let (output, _) = client
