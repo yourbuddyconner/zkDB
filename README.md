@@ -1,107 +1,268 @@
-# SP1 Time Series Analysis and Forecasting Project
+# zkDB: Zero-Knowledge Database 🧠
 
-This project demonstrates how to use [SP1](https://github.com/succinctlabs/sp1) to perform time series analysis and forecasting within a zero-knowledge proof system. It showcases the ability to process time series data, calculate statistical measures, and generate forecasts, all while maintaining privacy and verifiability.
+## Reflection on the Future of Blockchain Development
 
-## What Does This Project Do?
+Before diving into the technical details of zkDB, it's crucial to consider the broader context of blockchain development and its future direction. There's a growing recognition in the blockchain community that current blockchain virtual machines (EVMs, SVMs, Move, etc.) may not be sufficient to achieve feature parity with Web2 applications or to fully realize the potential of trustless applications.
 
-This project implements a time series analysis and forecasting system using SP1, which allows for:
+This limitation points to an increasing need for off-chain services and computation. As blockchain platforms evolve, we're likely to see a shift towards:
 
-1. Processing time series data (timestamps and corresponding values)
-2. Calculating statistical measures such as mean, median, and standard deviation
-3. Computing moving averages and exponential moving averages
-4. Performing simple exponential smoothing for forecasting
-5. Generating zero-knowledge proofs of these computations
+1. A greater emphasis on off-chain services to extend blockchain capabilities.
+2. Simpler tools and frameworks for building these off-chain services.
+3. Blockchain networks optimizing for throughput and scale, while relying on off-chain services for complex computations.
+4. Increased demand for developers skilled in building hybrid systems that leverage both on-chain and off-chain components.
 
-## Why is it Useful?
+zkDB is positioned at the forefront of this trend. By combining the security of Merkle trees, the efficiency of off-chain computation, and the verifiability of zero-knowledge proofs, zkDB demonstrates how we can build powerful, scalable systems that extend beyond the limitations of traditional blockchain VMs.
 
-1. **Privacy-Preserving Analytics**: Perform time series analysis without revealing the underlying data.
-2. **Verifiable Forecasts**: Generate forecasts that can be verified without exposing the model or historical data.
-3. **On-Chain Analytics**: Enable complex time series computations that can be verified on-chain, opening up possibilities for DeFi applications, prediction markets, and more.
-4. **Data Integrity**: Ensure the integrity of time series data and computations through zero-knowledge proofs.
+---
 
-## Requirements
+## What is zkDB?
 
-- [Rust](https://rustup.rs/)
-- [SP1](https://docs.succinct.xyz/getting-started/install.html)
+zkDB is a Merkle tree-based database utilizing the [SP1](https://succinct.xyz) zkVM for secure and efficient operations. It supports ```insert```, ```query```, and ```prove``` commands, providing a foundation for verifiable data storage and retrieval.
 
-## Running the Project
+## How It Works
 
-### Build the Program
+zkDB combines the power of Merkle trees with zero-knowledge proofs to create a verifiable database system. Here's a high-level overview of its operation:
 
-To build the program, run:
-To build the program, run the following command:
+1. **Data Storage**: When data is inserted, it's stored as leaves in a Merkle tree.
+2. **Merkle Tree**: The Merkle tree provides an efficient way to cryptographically verify the integrity of large datasets.
+3. **Zero-Knowledge Proofs**: Using SP1 zkVM, the system can generate proofs of data inclusion without revealing the actual data.
+4. **Verifiable Queries**: Users can query data and receive both the result and a proof of its correctness.
 
-```sh
-cd program
-cargo prove build
+## How zkDB Enhances Standard Merkle Trees
+
+zkDB builds on Merkle trees, adding crucial features:
+
+1. **Zero-Knowledge Proofs**: Prove data operations without revealing content.
+2. **Complex Queries**: Go beyond simple inclusion proofs.
+3. **Full Verifiability**: Every action (insert, query, prove) generates a proof.
+4. **Stateless Design**: Entire database state can be serialized, enabling unique distributed use cases.
+5. **zkVM Integration**: Allows for advanced computations while maintaining verifiability.
+
+These additions transform zkDB from a simple Merkle tree into a powerful, privacy-preserving database system with broad applications in trustless environments.
+
+```mermaid
+graph TD
+    A[Standard Merkle Tree] -->|Add ZK Proofs| B[zkDB]
+    B -->|Enable| C[Data Privacy]
+    B -->|Support| D[Complex Queries]
+    B -->|Provide| E[Full Verifiability]
+    B -->|Allow| F[Stateless Operations]
+    B -->|Integrate| G[Advanced Computations]
 ```
 
-### Execute the Program
+## How zkDB Differs from Standard Merkle Trees
 
-To run the program without generating a proof:
+While zkDB builds upon the foundation of Merkle trees, it extends their capabilities in several key ways:
 
-```sh
-cd script
-cargo run --release -- --execute
+1. **Zero-Knowledge Proofs**: Unlike standard Merkle trees, zkDB integrates with the SP1 zkVM to generate zero-knowledge proofs. This allows for verifiable computations without revealing the underlying data.
+
+2. **Stateless Execution**: zkDB is designed for stateless execution within the zkVM environment. The entire state is serialized and deserialized between operations, allowing for verifiable state transitions.
+
+3. **Complex Operations**: While Merkle trees typically offer simple inclusion proofs, zkDB can support more complex operations and queries, all of which can be proven in zero-knowledge.
+
+4. **Verifiable Queries**: In addition to proving inclusion, zkDB can prove the correctness of query results without revealing the actual data.
+
+5. **Integration with zkVM**: The use of SP1 zkVM allows for arbitrary computations on the data, not just simple lookups. This enables more sophisticated database operations while maintaining verifiability.
+
+6. **Proof Generation for All Operations**: Every operation (insert, query, prove) can generate a proof, not just inclusion proofs as in standard Merkle trees.
+
+7. **Serializable State**: The entire database state, including the Merkle tree structure, is serialized and can be passed around or stored externally, enabling unique use cases in distributed systems.
+
+These features make zkDB more than just a Merkle tree implementation. It's a full-fledged verifiable database system that leverages zero-knowledge proofs to provide enhanced privacy and verifiability for complex operations.
+
+### Process Flow
+
+```mermaid
+graph TD
+    A[zkDB CLI] -->|Prepare Input| B(SP1 zkVM)
+    B -->|Execute Operation| C{Merkle Tree}
+    C -->|Generate Result| D[Output + Proof]
+    D -->|Return| A
+    E[State File] <-->|Read/Write| A
 ```
 
-This will execute the program and display the output.
+1. The zkDB CLI prepares the input for the SP1 zkVM.
+2. The zkVM executes the requested operation on the Merkle tree.
+3. Results and proofs are generated.
+4. The output is returned to the CLI.
+5. State is maintained between operations using a local file.
 
-### Generate a Core Proof
+## Key Concepts
 
-To generate a core proof for your program:
+- **Merkle Tree**: A tree in which every leaf node is labelled with the cryptographic hash of a data block, and every non-leaf node is labelled with the cryptographic hash of the labels of its child nodes.
+- **Zero-Knowledge Proofs**: Cryptographic methods by which one party can prove to another party that they know a value x, without conveying any information apart from the fact that they know the value x.
+- **SP1 zkVM**: A zero-knowledge virtual machine that allows for the creation and verification of proofs for arbitrary computations.
 
-```sh
-cd script
-cargo run --release -- --prove
+## Use Cases
+
+- **Verifiable Data Storage**: Ensure data integrity in distributed systems.
+- **Privacy-Preserving Queries**: Prove data existence without revealing the data itself.
+- **Audit Trails**: Create verifiable logs of data operations.
+- **Decentralized Applications**: Build trustless systems with verifiable state transitions.
+
+## Prerequisites
+
+- Rust and Cargo (latest stable version)
+- SP1 zkVM toolchain
+
+## Building the Project
+
+1. Clone the repository and navigate to the project directory:
+
+   ```
+   git clone <repository-url>
+   cd zkdb
+   ```
+
+2. Build the project in release mode:
+
+   ```
+   cargo build --release
+   ```
+
+   *Note: It's crucial to use the ```--release``` flag when building, as sp1-sdk must be built in release mode.*
+
+## Using the zkDB Script
+
+The zkDB script provides a command-line interface to interact with the Merkle tree database. Here's how to use it:
+
+1. Ensure you're in the project root directory.
+
+2. Run the script using Cargo in release mode:
+
+   ```
+   cargo run --release --bin merkle -- <command> [arguments]
+   ```
+
+   Replace ```<command>``` with one of the following: ```insert```, ```query```, or ```prove```.
+
+   *Remember to always use the ```--release``` flag when running the script.*
+
+### Commands
+
+#### Insert
+
+To insert a key-value pair:
+
+```
+cargo run --release --bin merkle -- insert <key> <value>
 ```
 
-### Generate an EVM-Compatible Proof
+**Example:**
 
-> [!WARNING]
-> You will need at least 128GB RAM to generate a Groth16 or PLONK proof.
-
-To generate a proof that is small enough to be verified on-chain and verifiable by the EVM:
-
-```sh
-cd script
-cargo run --release --bin evm -- --system groth16
+```
+cargo run --release --bin merkle -- insert mykey myvalue
 ```
 
-this will generate a Groth16 proof. If you want to generate a PLONK proof, run the following command:
+#### Query
 
-```sh
-cargo run --release --bin evm -- --system plonk
+To query a value by key:
+
+```
+cargo run --release --bin merkle -- query <key>
 ```
 
-These commands will also generate fixtures that can be used to test the verification of SP1 zkVM proofs
-inside Solidity.
+**Example:**
 
-### Retrieve the Verification Key
-
-To retrieve your `programVKey` for your on-chain contract, run the following command:
-
-```sh
-cargo prove vkey --elf elf/riscv32im-succinct-zkvm-elf
+```
+cargo run --release --bin merkle -- query mykey
 ```
 
-## Using the Prover Network
+#### Prove
 
-We highly recommend using the Succinct prover network for any non-trivial programs or benchmarking purposes. For more 
-information, see the [setup guide](https://docs.succinct.xyz/generating-proofs/prover-network.html).
+To generate a proof for a key:
 
-To get started, copy the example environment file:
-
-```sh
-cp .env.example .env
+```
+cargo run --release --bin merkle -- prove <key>
 ```
 
-Then, set the `SP1_PROVER` environment variable to `network` and set the `SP1_PRIVATE_KEY`
-environment variable to your whitelisted private key.
+**Example:**
 
-For example, to generate an EVM-compatible proof using the prover network, run the following
-command:
-
-```sh
-SP1_PROVER=network SP1_PRIVATE_KEY=... cargo run --release --bin evm
 ```
+cargo run --release --bin merkle -- prove mykey
+```
+
+### Generating SP1 Proofs
+
+To generate and verify an SP1 proof along with any command, add the ```--prove``` flag:
+
+```
+cargo run --release --bin merkle -- <command> [arguments] --prove
+```
+
+**Examples:**
+
+```
+cargo run --release --bin merkle -- insert mykey myvalue --prove
+cargo run --release --bin merkle -- query mykey --prove
+cargo run --release --bin merkle -- prove mykey --prove
+```
+
+These commands will execute the respective operations and also generate and verify an SP1 proof.
+
+### State Management
+
+The script automatically manages the state of the Merkle tree. The state is passed between operations as a base64-encoded JSON string. This allows for stateless execution of the zkVM program while maintaining continuity between commands.
+
+## Project Structure
+
+- ```src/main.rs```: Contains the main zkVM program logic for Merkle tree operations.
+- ```src/bin/merkle.rs```: Implements the command-line interface for interacting with the zkVM program.
+- ```tests/integration_tests.rs```: Contains integration tests for the zkVM program.
+- ```script/src/bin/db.rs```: [Describe purpose or remove if unused]
+- ```script/merkle_state.txt```: Stores the current state of the Merkle tree.
+- ```.env.example```: Example environment variables configuration.
+- ```README.md```: Project documentation.
+
+## Running Tests
+
+To run the integration tests:
+
+```
+cargo test
+```
+
+This will execute the tests defined in ```tests/integration_tests.rs```.
+
+## Implementation Details
+
+- The project uses the ```rs_merkle``` crate for Merkle tree operations.
+- The ```sp1-zkvm``` crate is used for zkVM-specific functionality.
+- State is serialized and deserialized using ```serde_json``` and ```base64``` encoding.
+
+## Benchmark Results
+
+Here are the benchmark results for the main operations:
+
+```
++-----------+--------+--------------+-------------+
+| Operation | Cycles | Total Time   | Avg Time    |
++-----------+--------+--------------+-------------+
+| insert    | 44453  | 1.076435122s | 10.764351ms |
++-----------+--------+--------------+-------------+
+| query     | 19995  | 1.038018872s | 10.380188ms |
++-----------+--------+--------------+-------------+
+| prove     | 20024  | 1.059557666s | 10.595576ms |
++-----------+--------+--------------+-------------+
+```
+
+These results show the number of cycles, total time, and average time for each operation over 100 iterations.
+
+## Future Enhancements
+
+- Implement batch operations for improved efficiency.
+- Add support for more complex query types.
+- Integrate with distributed storage systems.
+- Develop a high-level API for easier integration with other applications.
+
+## Note
+
+This project is a demonstration of using SP1 zkVM for Merkle tree operations. It's not intended for production use without further security audits and optimizations.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## License
+
+MIT
