@@ -1,0 +1,9 @@
+[package]
+version = "0.1.0"
+name = "zkdb-sled"
+edition = "2021"
+
+[dependencies]
+sp1-zkvm = "2.0.0"
+ruint = "1.7.0"
+sled = "0.34.6"

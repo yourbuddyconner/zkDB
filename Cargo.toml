@@ -1,0 +1,15 @@
+[workspace]
+members = [
+    "crates/zkdb-sled",
+    "crates/zkdb-duckdb",
+    "crates/zkdb-merkle",
+    "crates/script",
+]
+resolver = "2"
+
+[workspace.dependencies]
+alloy-sol-types = "0.7.7"
+rs_merkle = "1.4.2"
+
+[patch.crates-io]
+arrow-buffer = { git = "https://github.com/yourbuddyconner/arrow-rs", branch = "master", package = "arrow-buffer" }
