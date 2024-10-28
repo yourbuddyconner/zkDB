@@ -3,7 +3,6 @@ members = [
     "crates/zkdb-merkle",
     "crates/zkdb-core",
     "crates/zkdb-lib",
-    "crates/script",
 ]
 resolver = "2"
 
@@ -11,3 +10,15 @@ resolver = "2"
 alloy-sol-types = "0.7.7"
 rs_merkle = "1.4.2"
 prettytable-rs = "0.10"
+sp1-sdk = { git = "https://github.com/succinctlabs/sp1.git" }
+thiserror = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+zkdb_core = { path = "crates/zkdb-core" }
+zkdb_merkle = { path = "crates/zkdb-merkle" }
+zkdb_lib = { path = "crates/zkdb-lib" }
+
+sp1-zkvm = "2.0.0"
+base64 = { version = "0.13", features = ["alloc"] }
+hex = { version = "0.4", features = ["alloc"] }
+bincode = { version = "1.3" }

@@ -2,7 +2,11 @@ use sp1_sdk::{
     HashableKey, ProverClient, SP1ProofWithPublicValues, SP1ProvingKey, SP1PublicValues, SP1Stdin,
     SP1VerifyingKey,
 };
+use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
+use zkdb_merkle::get_elf;
 
 // reexport zkdb_core
 pub use zkdb_core::{Command, QueryResult};
@@ -14,11 +18,12 @@ pub struct Database {
 }
 
 impl Database {
-    pub fn new(elf: &'static [u8], initial_state: Vec<u8>) -> Self {
+    pub fn new(initial_state: Vec<u8>) -> Self {
+        let elf = get_elf();
         Database {
             elf,
             state: initial_state,
-            executor: SP1Executor::new(elf),
+            executor: SP1Executor::new(&elf),
         }
     }
 

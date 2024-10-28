@@ -1,53 +1,123 @@
 # zkDB Crate Structure
 
-The zkDB project will consist of several crates, each serving a specific purpose. The main crates are:
+The zkDB project consists of several crates, each serving a specific purpose:
 
 ## zkdb-core
 
-This crate will serve as the base for various database engines implemented as SP1 programs. It will provide common utilities, data structures, and interfaces that can be shared across different database engines.
+This crate provides the foundation for building SP1 Programs that implement database functionality:
 
-### zkdb-merkle
+- Core traits like `DatabaseEngine` for implementing SP1 programs
+- Common data structures for commands and results used within SP1
+- No-std compatible for SP1 runtime environment
+- Serialization interfaces for SP1 program I/O
+- Error types specific to SP1 program execution
 
-This crate will implement a Merkle tree-based database engine as an SP1 program. It will provide functionality for inserting, querying, and generating proofs for key-value pairs stored in a Merkle tree.
+## zkdb-registry
 
-### zkdb-duckdb
+This crate manages pre-compiled SP1 program ELF binaries:
 
-This crate will implement a database engine based on DuckDB, a lightweight and embeddable SQL database management system. It will provide functionality for executing SQL queries and generating proofs for the query results.
+- Stores pre-compiled ELF files as embedded binary data
+- Provides a registry pattern for zkdb-lib to access different SP1 programs
+- Handles versioning and metadata for ELF binaries
+- Example structure:
+  ```rust
+  pub struct ZkVMRegistry {
+      merkle_elf: &'static [u8],
+      // other SP1 program ELFs...
+  }
+  ```
 
-### Other Database Engines
+## zkdb-merkle
 
-Additional crates can be added to implement other database engines as SP1 programs, such as a time-series database, a graph database, or any other specialized database system.
+An example implementation of a database engine as an SP1 program:
+
+- Built using zkdb-core traits and interfaces
+- Implements Merkle tree operations inside SP1
+- Demonstrates how to build a database engine using zkdb-core
+- Compiles to an ELF that gets stored in zkdb-registry
 
 ## zkdb-lib
 
-This crate will serve as the primary interface for interacting with the various database engines. It will provide a high-level API for creating, querying, and managing databases, as well as generating and verifying proofs.
+The primary interface crate that applications will use to interact with zkDB:
 
-The `zkdb-lib` crate will act as a wrapper around the different `zkdb-core` crates, abstracting away the underlying implementation details and providing a consistent interface for working with different database engines.
+- High-level API for all database operations
+- Manages SP1 program execution through the registry
+- Handles state management and serialization
+- Provides proof generation and verification
+- Example usage:
+  ```rust
+  let db = Database::new(DatabaseType::Merkle);
+  db.execute_query(Command::Insert { key, value })?;
+  ```
 
 ## zkdb-cli
 
-This crate will provide a command-line interface (CLI) for interacting with the zkDB system. It will allow users to create, manage, and query databases, as well as generate and verify proofs from the command line.
+Command-line interface built on top of zkdb-lib:
 
-The `zkdb-cli` crate will depend on the `zkdb-lib` crate to interact with the underlying database engines.
+- User-friendly commands for database operations
+- Built entirely using zkdb-lib's public API
+- Proof management utilities
+- Configuration handling
 
 ## Additional Crates
 
-Depending on the project's requirements, additional crates may be added to provide supplementary functionality, such as:
+### zkdb-types (future)
+- Common data types for both SP1 programs and client code
+- Serialization formats
+- Type conversion utilities
 
-- `zkdb-types`: A crate for defining common data types and structures used across the zkDB project.
-- `zkdb-utils`: A crate containing utility functions and helpers used throughout the project.
-- `zkdb-tests`: A crate for housing integration and end-to-end tests for the zkDB system.
+### zkdb-utils (future)
+- Shared utility functions
+- Helper methods
+- Common tools
+
+## Architecture Flow
+
+1. SP1 Program Development:
+   - Use zkdb-core to implement database logic
+   - Compile to ELF binary
+   - Store in zkdb-registry
+
+2. Client Usage:
+   - Applications use zkdb-lib
+   - zkdb-lib loads appropriate ELF from registry
+   - zkdb-lib handles all SP1 execution details
 
 ## Dependencies
 
-The zkDB crates will depend on various external crates, including:
+The project uses different dependencies for SP1 programs vs client code:
 
-- `sp1-sdk`: The SP1 Software Development Kit, which provides utilities for developing and proving SP1 programs.
-- `serde`, `serde_json`: For serialization and deserialization of data structures.
-- `clap`: For parsing command-line arguments in the `zkdb-cli` crate.
-- `tracing`, `log`: For logging and debugging purposes.
-- `duckdb`: The DuckDB crate, used in the `zkdb-duckdb` crate.
-- Any other crates required by the specific database engines or utilities.
+### SP1 Program Dependencies (zkdb-core, database implementations)
+- `sp1-zkvm`: Core SP1 functionality
+- `serde` with no-std features
+- Domain-specific libraries (e.g., rs_merkle)
 
-This crate structure separates concerns and allows for modular development and testing of different database engines. The `zkdb-lib` crate acts as a unified interface, making it easier to work with and switch between different database engines without modifying the application code.
+### Client Dependencies (zkdb-lib, zkdb-cli)
+- `sp1-sdk`: SP1 prover/verifier functionality
+- Full `serde` stack
+- `clap` and other user-facing utilities
 
+## Build Process
+
+1. SP1 Programs:
+   - Implement using zkdb-core
+   - Compile to ELF
+   - Add to zkdb-registry
+
+2. Client Libraries:
+   - Use zkdb-lib which loads from registry
+   - No direct SP1 program compilation needed
+
+## State Management
+
+- SP1 programs define their state format using zkdb-core
+- zkdb-lib handles state serialization and management
+- State is passed between operations in a format specific to each engine
+
+## Proof System
+
+- SP1 programs focus on computation logic
+- zkdb-lib handles all proof generation and verification
+- Proof artifacts are managed consistently across engines
+
+This architecture cleanly separates SP1 program development (using zkdb-core) from client usage (through zkdb-lib), with zkdb-registry serving as the bridge between them.
