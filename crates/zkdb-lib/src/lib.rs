@@ -1,12 +1,13 @@
+use serde::{Deserialize, Serialize};
 use sp1_sdk::{
     HashableKey, ProverClient, SP1ProofWithPublicValues, SP1ProvingKey, SP1PublicValues, SP1Stdin,
     SP1VerifyingKey,
 };
 use std::env;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use thiserror::Error;
-use zkdb_merkle::get_elf;
+use tracing::{debug, error, instrument};
 
 // reexport zkdb_core
 pub use zkdb_core::{Command, QueryResult};
@@ -17,9 +18,17 @@ pub struct Database {
     executor: SP1Executor,
 }
 
+pub fn get_elf() -> &'static [u8] {
+    debug!("Loading ELF binary from {}", env!("ZKDB_ELF_PATH"));
+    include_bytes!(env!("ZKDB_ELF_PATH"))
+}
+
 impl Database {
+    #[instrument(skip(initial_state))]
     pub fn new(initial_state: Vec<u8>) -> Self {
+        debug!("Creating new Database instance");
         let elf = get_elf();
+        debug!("Loaded ELF binary, size: {} bytes", elf.len());
         Database {
             elf,
             state: initial_state,
@@ -27,28 +36,39 @@ impl Database {
         }
     }
 
-    pub fn get_elf(&self) -> &'static [u8] {
-        self.elf
-    }
-
+    #[instrument(skip(self, command))]
     pub fn execute_query(
         &mut self,
         command: Command,
         generate_proof: bool,
     ) -> Result<QueryResult, DatabaseError> {
+        debug!(?generate_proof, "Executing query");
         let result = self
             .executor
             .execute_query(&self.state, &command, generate_proof)?;
+        debug!("Query executed successfully, updating state");
         self.state.clone_from(&result.new_state);
         Ok(result)
     }
 
+    #[instrument(skip(self, proof))]
     pub fn verify_proof(&self, proof: &ProvenOutput) -> Result<bool, DatabaseError> {
+        debug!("Verifying proof");
         self.executor.verify_proof(proof)
     }
 
+    #[instrument(skip(self))]
     pub fn get_state(&self) -> &[u8] {
         &self.state
+    }
+
+    #[instrument(skip(self, path))]
+    pub fn save_state(&self, path: &Path) -> Result<(), DatabaseError> {
+        debug!(path = ?path, "Saving database state");
+        fs::write(path, bincode::serialize(&self.state).unwrap()).map_err(|e| {
+            error!(error = ?e, "Failed to save state");
+            DatabaseError::QueryExecutionFailed(e.to_string())
+        })
     }
 }
 
@@ -76,9 +96,13 @@ pub struct SP1Executor {
 }
 
 impl SP1Executor {
+    #[instrument(skip(elf))]
     pub fn new(elf: &'static [u8]) -> Self {
+        debug!("Creating new SP1Executor");
         let client = ProverClient::new();
+        debug!("Generated ProverClient");
         let (pk, vk) = client.setup(elf);
+        debug!("Generated proving and verifying keys");
         SP1Executor {
             client,
             elf,
@@ -87,32 +111,42 @@ impl SP1Executor {
         }
     }
 
+    #[instrument(skip(self, state, command))]
     pub fn execute_query(
         &self,
         state: &[u8],
         command: &Command,
         generate_proof: bool,
     ) -> Result<QueryResult, DatabaseError> {
+        debug!(?generate_proof, "Preparing query execution");
+        debug!(?command, "Command to execute");
+
         let mut stdin = SP1Stdin::new();
         stdin.write(&state.to_vec());
-        stdin.write(
-            &serde_json::to_vec(command)
-                .map_err(|e| DatabaseError::QueryExecutionFailed(e.to_string()))?,
-        );
-        stdin.write(&[generate_proof as u8]);
+        stdin.write(command);
+        debug!(?stdin, "Stdin prepared");
 
         if generate_proof {
+            debug!("Generating proof");
             let proof = self
                 .client
                 .prove(&self.pk, stdin.clone())
                 .run()
-                .map_err(|e| DatabaseError::ProofGenerationFailed(e.to_string()))?;
+                .map_err(|e| {
+                    error!(error = ?e, "Proof generation failed");
+                    DatabaseError::ProofGenerationFailed(e.to_string())
+                })?;
+            debug!("Proof generated successfully");
 
             let (output, _) = self
                 .client
                 .execute(self.elf, stdin.clone())
                 .run()
-                .map_err(|e| DatabaseError::QueryExecutionFailed(e.to_string()))?;
+                .map_err(|e| {
+                    error!(error = ?e, "Query execution failed");
+                    DatabaseError::QueryExecutionFailed(e.to_string())
+                })?;
+            debug!("Query executed with proof");
 
             self.parse_output(
                 output,
@@ -122,48 +156,64 @@ impl SP1Executor {
                 }),
             )
         } else {
-            let (output, _) = self
-                .client
-                .execute(self.elf, stdin)
-                .run()
-                .map_err(|e| DatabaseError::QueryExecutionFailed(e.to_string()))?;
-            // No proof is generated, so we don't need to pass it to the parser.
+            debug!("Executing query without proof");
+            let (output, _) = self.client.execute(self.elf, stdin).run().map_err(|e| {
+                error!(error = ?e, "Query execution failed");
+                DatabaseError::QueryExecutionFailed(e.to_string())
+            })?;
+            debug!("Query executed successfully");
             self.parse_output(output, None)
         }
     }
 
+    #[instrument(skip(self, output, proof))]
     fn parse_output(
         &self,
         output: SP1PublicValues,
         proof: Option<ProvenOutput>,
     ) -> Result<QueryResult, DatabaseError> {
-        let output_str = String::from_utf8(output.to_vec())
-            .map_err(|e| DatabaseError::QueryExecutionFailed(e.to_string()))?;
-        let output_json: serde_json::Value = serde_json::from_str(&output_str)
-            .map_err(|e| DatabaseError::QueryExecutionFailed(e.to_string()))?;
+        debug!("Parsing query output");
+        let output_str = String::from_utf8(output.to_vec()).map_err(|e| {
+            error!(error = ?e, "Failed to parse output as UTF-8");
+            DatabaseError::QueryExecutionFailed(e.to_string())
+        })?;
 
-        let data = output_json["result"].clone();
+        let output_json: serde_json::Value = serde_json::from_str(&output_str).map_err(|e| {
+            error!(error = ?e, "Failed to parse output as JSON");
+            DatabaseError::QueryExecutionFailed(e.to_string())
+        })?;
 
-        let new_state = output_json["state"]
-            .as_str()
-            .ok_or_else(|| {
-                DatabaseError::QueryExecutionFailed("Missing state in output".to_string())
-            })?
-            .as_bytes()
-            .to_vec();
+        debug!(?output_json, "Parsed output JSON");
 
-        // If a proof is provided, verify it.
+        let data = output_json["data"].clone();
+        let new_state = output_json["new_state"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_u64().unwrap() as u8)
+            .collect();
+
         if let Some(proof) = proof {
+            debug!("Verifying generated proof");
             self.verify_proof(&proof)?;
+            debug!("Proof verified successfully");
         }
 
         Ok(QueryResult { data, new_state })
     }
 
+    #[instrument(skip(self, proof))]
     pub fn verify_proof(&self, proof: &ProvenOutput) -> Result<bool, DatabaseError> {
+        debug!("Verifying proof");
         self.client
             .verify(&proof.proof_data, &self.vk)
-            .map(|_| true)
-            .map_err(|e| DatabaseError::ProofVerificationFailed(e.to_string()))
+            .map(|_| {
+                debug!("Proof verified successfully");
+                true
+            })
+            .map_err(|e| {
+                error!(error = ?e, "Proof verification failed");
+                DatabaseError::ProofVerificationFailed(e.to_string())
+            })
     }
 }

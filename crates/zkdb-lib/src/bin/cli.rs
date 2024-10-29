@@ -1,82 +1,141 @@
-use clap::{App, Arg, SubCommand};
+use bincode;
+use clap::{Arg, Command};
 use std::fs;
-use zkdb_core::{DatabaseError, QueryResult};
-use zkdb_lib::{Command, Database};
+use std::path::PathBuf;
+use tracing_subscriber::{self, EnvFilter};
+use zkdb_core::QueryResult;
+use zkdb_lib::{Command as DbCommand, Database};
+
+pub fn init_logging() {
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let matches = App::new("zkDB CLI")
+    init_logging();
+
+    let matches = Command::new("zkDB CLI")
         .version("1.0")
         .author("Your Name")
         .about("Interact with zkDB")
         .subcommand(
-            SubCommand::with_name("init")
-                .about("Initialize a new database")
-                .arg(
-                    Arg::with_name("elf_path")
-                        .required(true)
-                        .help("Path to the ELF file"),
-                ),
+            Command::new("init").about("Initialize a new database").arg(
+                Arg::new("state_path")
+                    .long("state")
+                    .default_value("db_state.bin")
+                    .help("Path to save the initial database state"),
+            ),
         )
         .subcommand(
-            SubCommand::with_name("query")
+            Command::new("query")
                 .about("Execute a query")
                 .arg(
-                    Arg::with_name("command")
+                    Arg::new("command")
                         .required(true)
                         .help("Query command to execute"),
                 )
                 .arg(
-                    Arg::with_name("generate_proof")
+                    Arg::new("generate_proof")
                         .long("generate-proof")
                         .help("Generate a proof for the query"),
+                )
+                .arg(
+                    Arg::new("state_path")
+                        .long("state")
+                        .default_value("db_state.bin")
+                        .help("Path to database state file"),
                 ),
         )
         .subcommand(
-            SubCommand::with_name("verify").about("Verify a proof").arg(
-                Arg::with_name("proof_path")
+            Command::new("verify").about("Verify a proof").arg(
+                Arg::new("proof_path")
                     .required(true)
                     .help("Path to the proof file"),
             ),
         )
+        .subcommand(
+            Command::new("insert")
+                .about("Insert a key-value pair into the database")
+                .arg(Arg::new("key").required(true).help("Key to insert"))
+                .arg(Arg::new("value").required(true).help("Value to insert"))
+                .arg(
+                    Arg::new("state_path")
+                        .long("state")
+                        .default_value("db_state.bin")
+                        .help("Path to database state file"),
+                ),
+        )
         .get_matches();
 
     match matches.subcommand() {
-        ("init", Some(init_matches)) => {
-            let elf_path = init_matches.value_of("elf_path").unwrap();
-            let elf_data = fs::read(elf_path)?;
+        Some(("init", init_matches)) => {
+            let state_path = init_matches.get_one::<String>("state_path").unwrap();
             let initial_state = vec![]; // Empty initial state
-            let db = Database::new(Box::leak(elf_data.into_boxed_slice()), initial_state);
-            println!("Database initialized with ELF from {}", elf_path);
-            // Here you might want to save the database state to a file
+            let db = Database::new(initial_state);
+            println!("Initializing new database");
+            let db_state = db.get_state();
+            fs::write(state_path, bincode::serialize(&db_state)?)?;
+            println!("Database state saved to: {}", state_path);
         }
-        ("query", Some(query_matches)) => {
-            let command_str = query_matches.value_of("command").unwrap();
-            let generate_proof = query_matches.is_present("generate_proof");
+        Some(("query", query_matches)) => {
+            let command_str = query_matches.get_one::<String>("command").unwrap();
+            let generate_proof = query_matches.contains_id("generate_proof");
+            let state_path = query_matches.get_one::<String>("state_path").unwrap();
 
-            // For this example, we'll assume the database is already initialized
-            // In a real application, you'd load the database state from a file
-            let elf_data = include_bytes!("../../../../elf/riscv32im-succinct-zkvm-elf");
-            let mut db = Database::new(elf_data, vec![]);
+            let db_state: Vec<u8> = bincode::deserialize(&fs::read(state_path)?)?;
+            let mut db = Database::new(db_state);
 
             let command = parse_command(command_str)?;
             match db.execute_query(command, generate_proof) {
-                Ok(result) => print_query_result(result),
+                Ok(result) => {
+                    fs::write(state_path, bincode::serialize(&db.get_state())?)?;
+
+                    print_query_result(&result);
+
+                    if generate_proof {
+                        let proof_path = format!("proof_{}.bin", chrono::Utc::now().timestamp());
+                        fs::write(&proof_path, bincode::serialize(&result)?)?;
+                        println!("Proof saved to: {}", proof_path);
+                    }
+                }
                 Err(e) => eprintln!("Query execution failed: {}", e),
             }
         }
-        ("verify", Some(verify_matches)) => {
-            let proof_path = verify_matches.value_of("proof_path").unwrap();
-            let proof_data = fs::read(proof_path)?;
-            let proven_output: zkdb_lib::ProvenOutput = bincode::deserialize(&proof_data)?;
+        Some(("verify", verify_matches)) => {
+            let proof_path = verify_matches.get_one::<String>("proof_path").unwrap();
+            let proven_output: zkdb_lib::ProvenOutput =
+                bincode::deserialize(&fs::read(proof_path)?)?;
 
-            // Again, assuming the database is already initialized
-            let elf_data = include_bytes!("../../../../elf/riscv32im-succinct-zkvm-elf");
-            let db = Database::new(elf_data, vec![]);
+            let db_state: Vec<u8> = bincode::deserialize(&fs::read("db_state.bin")?)?;
+            let db = Database::new(db_state);
 
             match db.verify_proof(&proven_output) {
                 Ok(true) => println!("Proof verified successfully"),
                 Ok(false) => println!("Proof verification failed"),
                 Err(e) => eprintln!("Proof verification error: {}", e),
+            }
+        }
+        Some(("insert", insert_matches)) => {
+            let key = insert_matches.get_one::<String>("key").unwrap();
+            let value = insert_matches.get_one::<String>("value").unwrap();
+            let state_path = insert_matches.get_one::<String>("state_path").unwrap();
+
+            let db_state: Vec<u8> = bincode::deserialize(&fs::read(state_path)?)?;
+            let mut db = Database::new(db_state);
+
+            let command = DbCommand::Insert {
+                key: key.clone(),
+                value: value.clone(),
+            };
+
+            match db.execute_query(command, false) {
+                Ok(result) => {
+                    fs::write(state_path, bincode::serialize(&db.get_state())?)?;
+                    println!("Successfully inserted key '{}' with value '{}'", key, value);
+                    print_query_result(&result);
+                }
+                Err(e) => eprintln!("Insert failed: {}", e),
             }
         }
         _ => {
@@ -87,16 +146,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn parse_command(command_str: &str) -> Result<Command, Box<dyn std::error::Error>> {
-    // This is a placeholder. You'll need to implement proper parsing based on your Command enum
-    Ok(Command::Query(command_str.to_string()))
+fn parse_command(command_str: &str) -> Result<DbCommand, Box<dyn std::error::Error>> {
+    if let Some(parts) = command_str.split_once(':') {
+        match parts.0 {
+            "insert" => {
+                let (key, value) = parts
+                    .1
+                    .split_once('=')
+                    .ok_or("Invalid insert format. Use 'insert:key=value'")?;
+                return Ok(DbCommand::Insert {
+                    key: key.to_string(),
+                    value: value.to_string(),
+                });
+            }
+            _ => {}
+        }
+    }
+
+    Ok(DbCommand::Query {
+        key: command_str.to_string(),
+    })
 }
 
-fn print_query_result(result: QueryResult) {
+fn print_query_result(result: &QueryResult) {
     println!("Query Result:");
     println!("New State: {:?}", result.new_state);
     println!("Output: {:?}", result.data);
-    // if let Some(proof) = result.proof {
-    //     println!("Proof generated: {:?}", proof);
-    // }
 }

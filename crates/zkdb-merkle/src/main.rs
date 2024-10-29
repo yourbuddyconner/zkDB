@@ -3,15 +3,15 @@
 //! Supports `insert`, `query`, and `prove` commands.
 //! State is managed by passing the Merkle tree in and out as serialized data.
 
-#![no_main]
 sp1_zkvm::entrypoint!(main);
 
 extern crate alloc;
 
-use crate::alloc::string::ToString;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
+use alloc::string::ToString;
 use alloc::vec::Vec;
+use rs_merkle::proof_serializers;
 use rs_merkle::{algorithms::Sha256, Hasher, MerkleTree};
 use serde::ser::{SerializeSeq, Serializer};
 use serde::{Deserialize, Serialize};
@@ -70,11 +70,17 @@ impl DatabaseEngine for MerkleEngine {
 }
 
 pub fn main() {
-    let state: Vec<u8> = io::read();
-    let command: Command = io::read();
+    let state: Vec<u8> = io::read::<Vec<u8>>();
+    let command: Command = io::read::<Command>();
 
     let result = main_internal(&state, &command).unwrap_or_else(|e| QueryResult {
-        data: serde_json::json!({"error": e}),
+        data: serde_json::json!({
+            "error": {
+                "type": "QueryExecutionFailed",
+                "state_len": state.len(),
+                "details": format!("{:?}", e),
+            }
+        }),
         new_state: state,
     });
 
@@ -83,31 +89,29 @@ pub fn main() {
 }
 
 fn main_internal(state: &[u8], command: &Command) -> Result<QueryResult, DatabaseError> {
-    let mut merkle_state: MerkleState = bincode::deserialize(state)
-        .map_err(|e| DatabaseError::QueryExecutionFailed(e.to_string()))?;
+    // if the state is empty, initialize it
+    let mut merkle_state: MerkleState = if state.is_empty() {
+        MerkleState::new()
+    } else {
+        bincode::deserialize(state)
+            .map_err(|e| DatabaseError::QueryExecutionFailed(e.to_string()))?
+    };
 
-    let (result, new_state) = match command {
+    let (result) = match command {
         Command::Insert { key, value } => {
             let insert_result = insert(&mut merkle_state, key.clone(), value.clone())?;
-            (insert_result, merkle_state)
+            (insert_result)
         }
         Command::Query { key } => {
             let query_result = query(&merkle_state, key)?;
-            (query_result, merkle_state)
+            (query_result)
         }
         Command::Prove { key } => {
             let prove_result = prove(&merkle_state, key)?;
-            (prove_result, merkle_state)
+            (prove_result)
         }
     };
-
-    let new_state_bytes = bincode::serialize(&new_state)
-        .map_err(|e| DatabaseError::QueryExecutionFailed(e.to_string()))?;
-
-    Ok(QueryResult {
-        data: result,
-        new_state: new_state_bytes,
-    })
+    Ok(result)
 }
 
 /// Inserts a new key-value pair into the Merkle tree.
@@ -115,22 +119,34 @@ fn insert(
     state: &mut MerkleState,
     key: String,
     value: String,
-) -> Result<serde_json::Value, DatabaseError> {
+) -> Result<QueryResult, DatabaseError> {
     // Hash the value.
     let leaf = Sha256::hash(value.as_bytes());
     // Insert into the tree.
     state.leaves.push(leaf);
     let index = state.leaves.len() - 1;
-    state.key_indices.insert(key, index);
+    state.key_indices.insert(key.clone(), index);
 
-    Ok(serde_json::json!({"status": "inserted"}))
+    Ok(QueryResult {
+        data: serde_json::json!({
+            "key": key.clone(),
+            "value": value.clone(),
+            "index": index,
+            "leaf": hex::encode(leaf),
+            "inserted": true,
+        }),
+        new_state: bincode::serialize(&state).unwrap(),
+    })
 }
 
 /// Queries the value associated with a key.
-fn query(state: &MerkleState, key: &str) -> Result<serde_json::Value, DatabaseError> {
+fn query(state: &MerkleState, key: &str) -> Result<QueryResult, DatabaseError> {
     if let Some(&index) = state.key_indices.get(key) {
         let value_hash = &state.leaves[index];
-        Ok(serde_json::json!({"value_hash": hex::encode(value_hash)}))
+        Ok(QueryResult {
+            data: serde_json::json!({"value_hash": hex::encode(value_hash)}),
+            new_state: bincode::serialize(&state).unwrap(),
+        })
     } else {
         Err(DatabaseError::QueryExecutionFailed(
             "Key not found".to_string(),
@@ -139,7 +155,7 @@ fn query(state: &MerkleState, key: &str) -> Result<serde_json::Value, DatabaseEr
 }
 
 /// Generates a Merkle Inclusion Proof for a given key.
-fn prove(state: &MerkleState, key: &str) -> Result<serde_json::Value, DatabaseError> {
+fn prove(state: &MerkleState, key: &str) -> Result<QueryResult, DatabaseError> {
     if let Some(&index) = state.key_indices.get(key) {
         let merkle_tree = MerkleTree::<Sha256>::from_leaves(&state.leaves);
         let proof = merkle_tree.proof(&[index]);
@@ -147,16 +163,18 @@ fn prove(state: &MerkleState, key: &str) -> Result<serde_json::Value, DatabaseEr
             .root()
             .ok_or_else(|| DatabaseError::QueryExecutionFailed("Tree is empty".to_string()))?;
 
-        let proof_serialized = serde_json::to_value(ProofWrapper(proof))
-            .map_err(|e| DatabaseError::QueryExecutionFailed(e.to_string()))?;
-        let proof_encoded = base64::encode(serde_json::to_string(&proof_serialized).unwrap());
+        let proof_serialized: Vec<u8> = proof.serialize::<proof_serializers::ReverseHashesOrder>();
+        let proof_encoded = base64::encode(proof_serialized);
 
-        Ok(serde_json::json!({
-            "root": hex::encode(root),
-            "proof": proof_encoded,
-            "index": index,
-            "leaf": hex::encode(state.leaves[index]),
-        }))
+        Ok(QueryResult {
+            data: serde_json::json!({
+                "root": hex::encode(root),
+                "proof": proof_encoded,
+                "index": index,
+                "leaf": hex::encode(state.leaves[index]),
+            }),
+            new_state: bincode::serialize(&state).unwrap(),
+        })
     } else {
         Err(DatabaseError::QueryExecutionFailed(
             "Key not found".to_string(),

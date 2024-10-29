@@ -2,6 +2,7 @@
 name = "zkdb_lib"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
 
 [dependencies]
 sp1-sdk = { workspace = true }
@@ -9,7 +10,12 @@ thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 zkdb_core = { workspace = true }
-zkdb_merkle = { workspace = true }
+clap = { workspace = true }
+bincode = { workspace = true }
+chrono = "0.4"
+tracing = { workspace = true }
+hex = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [[bin]]
 name = "cli"

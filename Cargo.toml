@@ -17,6 +17,9 @@ serde_json = "1.0"
 zkdb_core = { path = "crates/zkdb-core" }
 zkdb_merkle = { path = "crates/zkdb-merkle" }
 zkdb_lib = { path = "crates/zkdb-lib" }
+clap = { version = "4.5.20", features = ["derive"] }
+tracing = { version = "0.1", features = ["log"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 sp1-zkvm = "2.0.0"
 base64 = { version = "0.13", features = ["alloc"] }

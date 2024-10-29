@@ -14,11 +14,11 @@ pub trait DatabaseEngine {
     ) -> Result<QueryResult, DatabaseError>;
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum Command {
-    Insert { key: String, value: String },
     Query { key: String },
     Prove { key: String },
+    Insert { key: String, value: String },
 }
 
 #[derive(Serialize, Deserialize, Debug)]
