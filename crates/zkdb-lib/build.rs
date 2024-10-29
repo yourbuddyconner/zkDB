@@ -14,7 +14,10 @@ fn main() {
             "prove",
             "build",
             "--output-directory",
-            "$CARGO_MANIFEST_DIR/elf",
+            &workspace_root
+                .join("target/elf-compilation")
+                .display()
+                .to_string(),
             "--elf-name",
             "zkdb_merkle",
         ])

@@ -4,6 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 use tracing_subscriber::{self, EnvFilter};
 use zkdb_core::QueryResult;
+use zkdb_lib::ProvenOutput;
 use zkdb_lib::{Command as DbCommand, Database};
 
 pub fn init_logging() {
@@ -20,12 +21,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .author("Your Name")
         .about("Interact with zkDB")
         .subcommand(
-            Command::new("init").about("Initialize a new database").arg(
-                Arg::new("state_path")
-                    .long("state")
-                    .default_value("db_state.bin")
-                    .help("Path to save the initial database state"),
-            ),
+            Command::new("init")
+                .about("Initialize a new database")
+                .arg(
+                    Arg::new("state_path")
+                        .long("state")
+                        .default_value("db_state.bin")
+                        .help("Path to save the initial database state"),
+                )
+                .arg(
+                    Arg::new("no_proof")
+                        .long("no-proof")
+                        .help("Disable SP1 proof generation")
+                        .action(clap::ArgAction::SetTrue),
+                ),
         )
         .subcommand(
             Command::new("query")
@@ -36,9 +45,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .help("Query command to execute"),
                 )
                 .arg(
-                    Arg::new("generate_proof")
-                        .long("generate-proof")
-                        .help("Generate a proof for the query"),
+                    Arg::new("no_proof")
+                        .long("no-proof")
+                        .help("Disable SP1 proof generation")
+                        .action(clap::ArgAction::SetTrue),
                 )
                 .arg(
                     Arg::new("state_path")
@@ -60,10 +70,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .arg(Arg::new("key").required(true).help("Key to insert"))
                 .arg(Arg::new("value").required(true).help("Value to insert"))
                 .arg(
+                    Arg::new("no_proof")
+                        .long("no-proof")
+                        .help("Disable SP1 proof generation")
+                        .action(clap::ArgAction::SetTrue),
+                )
+                .arg(
                     Arg::new("state_path")
                         .long("state")
                         .default_value("db_state.bin")
                         .help("Path to database state file"),
+                ),
+        )
+        .subcommand(
+            Command::new("prove")
+                .about("Generate a Merkle proof for a key")
+                .arg(
+                    Arg::new("key")
+                        .required(true)
+                        .help("Key to generate proof for"),
+                )
+                .arg(
+                    Arg::new("state_path")
+                        .long("state")
+                        .default_value("db_state.bin")
+                        .help("Path to database state file"),
+                )
+                .arg(
+                    Arg::new("output_path")
+                        .long("output")
+                        .help("Path to save the proof (defaults to proof_<key>_<timestamp>.bin)"),
                 ),
         )
         .get_matches();
@@ -71,6 +107,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match matches.subcommand() {
         Some(("init", init_matches)) => {
             let state_path = init_matches.get_one::<String>("state_path").unwrap();
+            let generate_proof = !init_matches.get_flag("no_proof");
             let initial_state = vec![]; // Empty initial state
             let db = Database::new(initial_state);
             println!("Initializing new database");
@@ -80,7 +117,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(("query", query_matches)) => {
             let command_str = query_matches.get_one::<String>("command").unwrap();
-            let generate_proof = query_matches.contains_id("generate_proof");
+            let generate_proof = !query_matches.get_flag("no_proof");
             let state_path = query_matches.get_one::<String>("state_path").unwrap();
 
             let db_state: Vec<u8> = bincode::deserialize(&fs::read(state_path)?)?;
@@ -119,6 +156,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(("insert", insert_matches)) => {
             let key = insert_matches.get_one::<String>("key").unwrap();
             let value = insert_matches.get_one::<String>("value").unwrap();
+            let generate_proof = !insert_matches.get_flag("no_proof");
             let state_path = insert_matches.get_one::<String>("state_path").unwrap();
 
             let db_state: Vec<u8> = bincode::deserialize(&fs::read(state_path)?)?;
@@ -129,13 +167,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 value: value.clone(),
             };
 
-            match db.execute_query(command, false) {
+            match db.execute_query(command, generate_proof) {
                 Ok(result) => {
                     fs::write(state_path, bincode::serialize(&db.get_state())?)?;
                     println!("Successfully inserted key '{}' with value '{}'", key, value);
                     print_query_result(&result);
                 }
                 Err(e) => eprintln!("Insert failed: {}", e),
+            }
+        }
+        Some(("prove", prove_matches)) => {
+            let key = prove_matches.get_one::<String>("key").unwrap();
+            let state_path = prove_matches.get_one::<String>("state_path").unwrap();
+
+            let db_state: Vec<u8> = bincode::deserialize(&fs::read(state_path)?)?;
+            let mut db = Database::new(db_state);
+
+            let command = DbCommand::Prove { key: key.clone() };
+
+            match db.execute_query(command, true) {
+                Ok(result) => {
+                    let output_path = prove_matches
+                        .get_one::<String>("output_path")
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| {
+                            format!("proof_{}_{}.bin", key, chrono::Utc::now().timestamp())
+                        });
+
+                    fs::write(&output_path, bincode::serialize(&result)?)?;
+
+                    println!("Merkle Proof Generation:");
+                    println!("------------------------");
+                    print_proof_result(&result);
+                    println!("\nProof saved to: {}", output_path);
+                }
+                Err(e) => eprintln!("Proof generation failed: {}", e),
             }
         }
         _ => {
@@ -172,4 +238,24 @@ fn print_query_result(result: &QueryResult) {
     println!("Query Result:");
     println!("New State: {:?}", result.new_state);
     println!("Output: {:?}", result.data);
+}
+
+fn print_proof_result(result: &QueryResult) {
+    if let Ok(proof_data) = serde_json::from_value::<serde_json::Value>(result.data.clone()) {
+        if let Some(root) = proof_data.get("root") {
+            println!("Merkle Root: {}", root.as_str().unwrap_or("N/A"));
+        }
+        if let Some(index) = proof_data.get("index") {
+            println!("Leaf Index: {}", index.as_u64().unwrap_or(0));
+        }
+        if let Some(leaf) = proof_data.get("leaf") {
+            println!("Leaf Hash: {}", leaf.as_str().unwrap_or("N/A"));
+        }
+        println!("\nProof Details:");
+        if let Some(proof) = proof_data.get("proof") {
+            println!("Proof (base64): {}", proof.as_str().unwrap_or("N/A"));
+        }
+    } else {
+        println!("Raw Result: {:?}", result.data);
+    }
 }
