@@ -1,4 +1,4 @@
-name: Build Program
+name: Rust CI
 
 on:
   workflow_dispatch:
@@ -6,34 +6,52 @@ on:
     branches: [main]
   pull_request:
 
-env:
-  FOUNDRY_PROFILE: ci
-
 jobs:
   check:
-    strategy:
-      fail-fast: true
-
-    name: Build
+    name: Check and Lint
     runs-on: ubuntu-20.04
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      RUST_BACKTRACE: "1"
+      SP1_PATH: "/home/runner/.sp1"
+      RUSTUP_HOME: "/home/runner/.rustup"
+
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Install rust toolchain
         uses: actions-rs/toolchain@v1
         with:
-          profile: minimal
-          toolchain: 1.79.0
+          toolchain: 1.81.0
+          components: clippy, rustfmt
 
       - name: Install SP1 toolchain
         run: |
           curl -L https://sp1.succinct.xyz | bash
-          ~/.sp1/bin/sp1up 
-          ~/.sp1/bin/cargo-prove prove --version
+          ~/.sp1/bin/sp1up
+          echo "$SP1_PATH/bin" >> $GITHUB_PATH
 
-      - name: Build SP1 program
+      - name: Verify SP1 installation
         run: |
-          cd program
-          ~/.sp1/bin/cargo-prove prove build
+          cargo prove --version
+          rustc --print target-list 
+
+      - name: Run cargo fmt
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all -- --check
+        env:
+          CARGO_INCREMENTAL: 1
+
+      - name: debug env 
+        run: |
+          echo $PATH
+          
+      - name: Run cargo clippy
+        uses: actions-rs/cargo@v1
+        env:
+          CARGO_INCREMENTAL: 1
+        with:
+          command: clippy
+          args: --all-features --all-targets -- -D warnings -A incomplete-features

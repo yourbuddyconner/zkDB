@@ -13,14 +13,13 @@ use alloc::string::ToString;
 use alloc::vec::Vec;
 use rs_merkle::proof_serializers;
 use rs_merkle::{algorithms::Sha256, Hasher, MerkleTree};
-use serde::ser::{SerializeSeq, Serializer};
 use serde::{Deserialize, Serialize};
 use sp1_zkvm::io;
 use zkdb_core::{Command, DatabaseEngine, DatabaseError, QueryResult};
 
 /// Key-value pair type.
 type Key = String;
-type Value = String;
+// type Value = String;
 
 /// Serializable state of the Merkle tree.
 #[derive(Serialize, Deserialize)]
@@ -37,23 +36,6 @@ impl MerkleState {
             leaves: Vec::new(),
             key_indices: BTreeMap::new(),
         }
-    }
-}
-
-/// Custom wrapper for MerkleProof serialization
-struct ProofWrapper(rs_merkle::MerkleProof<Sha256>);
-
-impl Serialize for ProofWrapper {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let proof_hashes = self.0.proof_hashes();
-        let mut seq = serializer.serialize_seq(Some(proof_hashes.len()))?;
-        for hash in proof_hashes {
-            seq.serialize_element(&hex::encode(hash))?;
-        }
-        seq.end()
     }
 }
 
@@ -97,19 +79,10 @@ fn main_internal(state: &[u8], command: &Command) -> Result<QueryResult, Databas
             .map_err(|e| DatabaseError::QueryExecutionFailed(e.to_string()))?
     };
 
-    let (result) = match command {
-        Command::Insert { key, value } => {
-            let insert_result = insert(&mut merkle_state, key.clone(), value.clone())?;
-            (insert_result)
-        }
-        Command::Query { key } => {
-            let query_result = query(&merkle_state, key)?;
-            (query_result)
-        }
-        Command::Prove { key } => {
-            let prove_result = prove(&merkle_state, key)?;
-            (prove_result)
-        }
+    let result = match command {
+        Command::Insert { key, value } => insert(&mut merkle_state, key.clone(), value.clone())?,
+        Command::Query { key } => query(&merkle_state, key)?,
+        Command::Prove { key } => prove(&merkle_state, key)?,
     };
     Ok(result)
 }
