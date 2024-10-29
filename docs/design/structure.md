@@ -12,21 +12,6 @@ This crate provides the foundation for building SP1 Programs that implement data
 - Serialization interfaces for SP1 program I/O
 - Error types specific to SP1 program execution
 
-## zkdb-registry
-
-This crate manages pre-compiled SP1 program ELF binaries:
-
-- Stores pre-compiled ELF files as embedded binary data
-- Provides a registry pattern for zkdb-lib to access different SP1 programs
-- Handles versioning and metadata for ELF binaries
-- Example structure:
-  ```rust
-  pub struct ZkVMRegistry {
-      merkle_elf: &'static [u8],
-      // other SP1 program ELFs...
-  }
-  ```
-
 ## zkdb-merkle
 
 An example implementation of a database engine as an SP1 program:
@@ -34,14 +19,14 @@ An example implementation of a database engine as an SP1 program:
 - Built using zkdb-core traits and interfaces
 - Implements Merkle tree operations inside SP1
 - Demonstrates how to build a database engine using zkdb-core
-- Compiles to an ELF that gets stored in zkdb-registry
+- Compiles to an ELF that is used by zkdb-lib
 
 ## zkdb-lib
 
 The primary interface crate that applications will use to interact with zkDB:
 
 - High-level API for all database operations
-- Manages SP1 program execution through the registry
+- Directly includes compiled SP1 program ELF binaries
 - Handles state management and serialization
 - Provides proof generation and verification
 - Example usage:
@@ -59,14 +44,14 @@ Command-line interface built on top of zkdb-lib:
 - Proof management utilities
 - Configuration handling
 
-## Additional Crates
+## Additional Crates (future)
 
-### zkdb-types (future)
+### zkdb-types
 - Common data types for both SP1 programs and client code
 - Serialization formats
 - Type conversion utilities
 
-### zkdb-utils (future)
+### zkdb-utils
 - Shared utility functions
 - Helper methods
 - Common tools
@@ -76,11 +61,11 @@ Command-line interface built on top of zkdb-lib:
 1. SP1 Program Development:
    - Use zkdb-core to implement database logic
    - Compile to ELF binary
-   - Store in zkdb-registry
+   - Include directly in zkdb-lib
 
 2. Client Usage:
    - Applications use zkdb-lib
-   - zkdb-lib loads appropriate ELF from registry
+   - zkdb-lib uses embedded ELF binaries
    - zkdb-lib handles all SP1 execution details
 
 ## Dependencies
@@ -102,11 +87,11 @@ The project uses different dependencies for SP1 programs vs client code:
 1. SP1 Programs:
    - Implement using zkdb-core
    - Compile to ELF
-   - Add to zkdb-registry
+   - ELF binary is included directly in zkdb-lib
 
 2. Client Libraries:
-   - Use zkdb-lib which loads from registry
-   - No direct SP1 program compilation needed
+   - Use zkdb-lib which contains the ELF binaries
+   - No separate registry or loading mechanism needed
 
 ## State Management
 
@@ -119,5 +104,3 @@ The project uses different dependencies for SP1 programs vs client code:
 - SP1 programs focus on computation logic
 - zkdb-lib handles all proof generation and verification
 - Proof artifacts are managed consistently across engines
-
-This architecture cleanly separates SP1 program development (using zkdb-core) from client usage (through zkdb-lib), with zkdb-registry serving as the bridge between them.
