@@ -34,7 +34,6 @@ jobs:
       - name: Verify SP1 installation
         run: |
           cargo prove --version
-          rustc --print target-list 
 
       - name: Run cargo fmt
         uses: actions-rs/cargo@v1
@@ -43,10 +42,6 @@ jobs:
           args: --all -- --check
         env:
           CARGO_INCREMENTAL: 1
-
-      - name: debug env 
-        run: |
-          echo $PATH
 
       - name: Run cargo check
         uses: actions-rs/cargo@v1
