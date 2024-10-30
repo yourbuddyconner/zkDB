@@ -1,10 +1,7 @@
-use bincode;
 use clap::{Arg, Command};
 use std::fs;
-use std::path::PathBuf;
 use tracing_subscriber::{self, EnvFilter};
 use zkdb_core::QueryResult;
-use zkdb_lib::ProvenOutput;
 use zkdb_lib::{Command as DbCommand, Database};
 
 pub fn init_logging() {
@@ -107,7 +104,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match matches.subcommand() {
         Some(("init", init_matches)) => {
             let state_path = init_matches.get_one::<String>("state_path").unwrap();
-            let generate_proof = !init_matches.get_flag("no_proof");
+            let _generate_proof = !init_matches.get_flag("no_proof");
             let initial_state = vec![]; // Empty initial state
             let db = Database::new(initial_state);
             println!("Initializing new database");
@@ -214,18 +211,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn parse_command(command_str: &str) -> Result<DbCommand, Box<dyn std::error::Error>> {
     if let Some(parts) = command_str.split_once(':') {
-        match parts.0 {
-            "insert" => {
-                let (key, value) = parts
-                    .1
-                    .split_once('=')
-                    .ok_or("Invalid insert format. Use 'insert:key=value'")?;
-                return Ok(DbCommand::Insert {
-                    key: key.to_string(),
-                    value: value.to_string(),
-                });
-            }
-            _ => {}
+        if parts.0 == "insert" {
+            let (key, value) = parts
+                .1
+                .split_once('=')
+                .ok_or("Invalid insert format. Use 'insert:key=value'")?;
+            return Ok(DbCommand::Insert {
+                key: key.to_string(),
+                value: value.to_string(),
+            });
         }
     }
 

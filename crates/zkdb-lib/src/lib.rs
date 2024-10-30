@@ -1,4 +1,3 @@
-use serde::{Deserialize, Serialize};
 use sp1_sdk::{
     HashableKey, ProverClient, SP1ProofWithPublicValues, SP1ProvingKey, SP1PublicValues, SP1Stdin,
     SP1VerifyingKey,
@@ -13,7 +12,6 @@ use tracing::{debug, error, instrument};
 pub use zkdb_core::{Command, QueryResult};
 
 pub struct Database {
-    elf: &'static [u8],
     state: Vec<u8>,
     executor: SP1Executor,
 }
@@ -30,9 +28,8 @@ impl Database {
         let elf = get_elf();
         debug!("Loaded ELF binary, size: {} bytes", elf.len());
         Database {
-            elf,
             state: initial_state,
-            executor: SP1Executor::new(&elf),
+            executor: SP1Executor::new(elf),
         }
     }
 

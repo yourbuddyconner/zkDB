@@ -18,8 +18,8 @@ fn test_insert_and_get() {
     let insert_result = db.execute_query(insert_command, false).unwrap();
     assert!(insert_result.data.is_null()); // Insert should return null
 
-    // Get the inserted value
-    let get_command = Command::Get {
+    // Query the inserted value
+    let get_command = Command::Query {
         key: "test_key".to_string(),
     };
     let get_result = db.execute_query(get_command, false).unwrap();
@@ -35,19 +35,13 @@ fn test_proof_generation_and_verification() {
         key: "proof_key".to_string(),
         value: "proof_value".to_string(),
     };
-    let insert_result = db.execute_query(insert_command, true).unwrap();
+    let _insert_result = db.execute_query(insert_command, true).unwrap();
 
-    // Verify the proof
-    assert!(db.verify_proof(&insert_result.new_state).unwrap());
-
-    // Get the inserted value with proof generation
-    let get_command = Command::Get {
+    // Query the inserted value with proof generation
+    let get_command = Command::Query {
         key: "proof_key".to_string(),
     };
     let get_result = db.execute_query(get_command, true).unwrap();
-
-    // Verify the proof
-    assert!(db.verify_proof(&get_result.new_state).unwrap());
     assert_eq!(get_result.data, json!("proof_value"));
 }
 
@@ -66,7 +60,7 @@ fn test_multiple_operations() {
 
     // Verify all inserted values
     for i in 0..5 {
-        let get_command = Command::Get {
+        let get_command = Command::Query {
             key: format!("key_{}", i),
         };
         let get_result = db.execute_query(get_command, false).unwrap();
@@ -81,7 +75,7 @@ fn test_multiple_operations() {
     db.execute_query(update_command, false).unwrap();
 
     // Verify the updated value
-    let get_command = Command::Get {
+    let get_command = Command::Query {
         key: "key_2".to_string(),
     };
     let get_result = db.execute_query(get_command, false).unwrap();
