@@ -117,7 +117,13 @@ fn query(state: &MerkleState, key: &str) -> Result<QueryResult, DatabaseError> {
     if let Some(&index) = state.key_indices.get(key) {
         let value_hash = &state.leaves[index];
         Ok(QueryResult {
-            data: serde_json::json!({"value_hash": hex::encode(value_hash)}),
+            data: serde_json::json!({
+                "key": key.to_string(),
+                "value": hex::encode(value_hash),
+                "index": index,
+                "leaf": hex::encode(value_hash),
+                "found": true,
+            }),
             new_state: bincode::serialize(&state).unwrap(),
         })
     } else {

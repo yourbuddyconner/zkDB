@@ -16,6 +16,13 @@ pub struct Database {
     executor: SP1Executor,
 }
 
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct ProvenQueryResult {
+    pub data: serde_json::Value,
+    pub new_state: Vec<u8>,
+    pub sp1_proof: Option<ProvenOutput>,
+}
+
 pub fn get_elf() -> &'static [u8] {
     debug!("Loading ELF binary from {}", env!("ZKDB_ELF_PATH"));
     include_bytes!(env!("ZKDB_ELF_PATH"))
@@ -38,7 +45,7 @@ impl Database {
         &mut self,
         command: Command,
         generate_proof: bool,
-    ) -> Result<QueryResult, DatabaseError> {
+    ) -> Result<ProvenQueryResult, DatabaseError> {
         debug!(?generate_proof, "Executing query");
         let result = self
             .executor
@@ -114,7 +121,7 @@ impl SP1Executor {
         state: &[u8],
         command: &Command,
         generate_proof: bool,
-    ) -> Result<QueryResult, DatabaseError> {
+    ) -> Result<ProvenQueryResult, DatabaseError> {
         debug!(?generate_proof, "Preparing query execution");
         debug!(?command, "Command to execute");
 
@@ -168,7 +175,7 @@ impl SP1Executor {
         &self,
         output: SP1PublicValues,
         proof: Option<ProvenOutput>,
-    ) -> Result<QueryResult, DatabaseError> {
+    ) -> Result<ProvenQueryResult, DatabaseError> {
         debug!("Parsing query output");
         let output_str = String::from_utf8(output.to_vec()).map_err(|e| {
             error!(error = ?e, "Failed to parse output as UTF-8");
@@ -190,13 +197,17 @@ impl SP1Executor {
             .map(|v| v.as_u64().unwrap() as u8)
             .collect();
 
-        if let Some(proof) = proof {
+        if let Some(proof) = proof.clone() {
             debug!("Verifying generated proof");
             self.verify_proof(&proof)?;
             debug!("Proof verified successfully");
         }
 
-        Ok(QueryResult { data, new_state })
+        Ok(ProvenQueryResult {
+            data,
+            new_state,
+            sp1_proof: proof,
+        })
     }
 
     #[instrument(skip(self, proof))]

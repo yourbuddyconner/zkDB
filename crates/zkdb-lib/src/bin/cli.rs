@@ -2,7 +2,7 @@ use clap::{Arg, Command};
 use std::fs;
 use tracing_subscriber::{self, EnvFilter};
 use zkdb_core::QueryResult;
-use zkdb_lib::{Command as DbCommand, Database};
+use zkdb_lib::{Command as DbCommand, Database, ProvenQueryResult};
 
 pub fn init_logging() {
     tracing_subscriber::fmt()
@@ -228,13 +228,13 @@ fn parse_command(command_str: &str) -> Result<DbCommand, Box<dyn std::error::Err
     })
 }
 
-fn print_query_result(result: &QueryResult) {
+fn print_query_result(result: &ProvenQueryResult) {
     println!("Query Result:");
     println!("New State: {:?}", result.new_state);
     println!("Output: {:?}", result.data);
 }
 
-fn print_proof_result(result: &QueryResult) {
+fn print_proof_result(result: &ProvenQueryResult) {
     if let Ok(proof_data) = serde_json::from_value::<serde_json::Value>(result.data.clone()) {
         if let Some(root) = proof_data.get("root") {
             println!("Merkle Root: {}", root.as_str().unwrap_or("N/A"));

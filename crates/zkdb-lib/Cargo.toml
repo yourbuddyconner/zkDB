@@ -17,6 +17,9 @@ tracing = { workspace = true }
 hex = { workspace = true }
 tracing-subscriber = { workspace = true }
 
+[dev-dependencies]
+serial_test = "2.0"
+
 [[bin]]
 name = "cli"
 path = "src/bin/cli.rs"
