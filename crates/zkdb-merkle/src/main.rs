@@ -12,7 +12,7 @@ use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec::Vec;
 use rs_merkle::proof_serializers;
-use rs_merkle::{algorithms::Sha256, Hasher, MerkleTree};
+use rs_merkle::{algorithms::Sha256, MerkleTree};
 use serde::{Deserialize, Serialize};
 use sp1_zkvm::io;
 use zkdb_core::{Command, DatabaseEngine, DatabaseError, QueryResult};
@@ -75,8 +75,9 @@ fn main_internal(state: &[u8], command: &Command) -> Result<QueryResult, Databas
     let mut merkle_state: MerkleState = if state.is_empty() {
         MerkleState::new()
     } else {
-        bincode::deserialize(state)
-            .map_err(|e| DatabaseError::QueryExecutionFailed(e.to_string()))?
+        bincode::deserialize(state).map_err(|e| {
+            DatabaseError::QueryExecutionFailed(format!("Failed to deserialize state: {}", e))
+        })?
     };
 
     let result = match command {
@@ -93,9 +94,16 @@ fn insert(
     key: String,
     value: String,
 ) -> Result<QueryResult, DatabaseError> {
-    // Hash the value.
-    let leaf = Sha256::hash(value.as_bytes());
-    // Insert into the tree.
+    // Convert hex string back to bytes
+    let value_bytes = hex::decode(&value).map_err(|e| {
+        DatabaseError::QueryExecutionFailed(format!("Failed to decode hex value: {}", e))
+    })?;
+
+    // Convert to fixed size array for Merkle tree
+    let mut leaf = [0u8; 32];
+    leaf.copy_from_slice(&value_bytes);
+
+    // Insert into the tree
     state.leaves.push(leaf);
     let index = state.leaves.len() - 1;
     state.key_indices.insert(key.clone(), index);
@@ -105,7 +113,7 @@ fn insert(
             "key": key.clone(),
             "value": value.clone(),
             "index": index,
-            "leaf": hex::encode(leaf),
+            "leaf": value.clone(),
             "inserted": true,
         }),
         new_state: bincode::serialize(&state).unwrap(),

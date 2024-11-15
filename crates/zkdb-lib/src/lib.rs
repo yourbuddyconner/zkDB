@@ -1,3 +1,4 @@
+use sha2::{Digest, Sha256};
 use sp1_sdk::{
     HashableKey, ProverClient, SP1ProofWithPublicValues, SP1ProvingKey, SP1PublicValues, SP1Stdin,
     SP1VerifyingKey,
@@ -5,13 +6,23 @@ use sp1_sdk::{
 use std::env;
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, error, instrument};
+use zkdb_store::{Store, StoreError};
 
 // reexport zkdb_core
 pub use zkdb_core::{Command, QueryResult};
 
+#[derive(Debug, Clone)]
+pub enum DatabaseType {
+    Merkle,
+}
+
 pub struct Database {
+    #[allow(dead_code)]
+    engine: DatabaseType,
+    store: Arc<dyn Store>,
     state: Vec<u8>,
     executor: SP1Executor,
 }
@@ -29,15 +40,107 @@ pub fn get_elf() -> &'static [u8] {
 }
 
 impl Database {
-    #[instrument(skip(initial_state))]
-    pub fn new(initial_state: Vec<u8>) -> Self {
+    #[instrument(skip(store))]
+    pub async fn new(
+        engine: DatabaseType,
+        store: Arc<dyn Store>,
+        // bincoded state is optional, defaults to empty
+        state: Option<Vec<u8>>,
+    ) -> Result<Self, DatabaseError> {
         debug!("Creating new Database instance");
         let elf = get_elf();
         debug!("Loaded ELF binary, size: {} bytes", elf.len());
-        Database {
-            state: initial_state,
+
+        Ok(Database {
+            engine,
+            store,
+            state: state.unwrap_or_default(),
             executor: SP1Executor::new(elf),
+        })
+    }
+
+    #[instrument(skip(self, value))]
+    pub async fn put(
+        &mut self,
+        key: &str,
+        value: &[u8],
+        generate_proof: bool,
+    ) -> Result<(), DatabaseError> {
+        // 1. Store the actual value
+        self.store.put(key, value).await?;
+
+        // 2. Calculate hash for Merkle tree
+        let mut hasher = Sha256::new();
+        hasher.update(value);
+        let value_hash = hex::encode(hasher.finalize());
+        debug!("PUT: Original value: {:?}", String::from_utf8_lossy(value));
+        debug!("PUT: Calculated hash: {}", value_hash);
+
+        // 3. Store hash in Merkle tree via SP1
+        let command = Command::Insert {
+            key: key.to_string(),
+            value: value_hash,
+        };
+
+        let result = self
+            .executor
+            .execute_query(&self.state, &command, generate_proof)?;
+
+        debug!("PUT: Result from executor: {:?}", result.data);
+
+        // update state
+        self.set_state(result.new_state);
+
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
+    pub async fn get(&self, key: &str, generate_proof: bool) -> Result<Vec<u8>, DatabaseError> {
+        // 1. Get hash from Merkle tree for verification
+        let command = Command::Query {
+            key: key.to_string(),
+        };
+        let result = self
+            .executor
+            .execute_query(&self.state, &command, generate_proof)?;
+        debug!("GET: Query Result: {:?}", result.data);
+
+        if result.data.get("error").is_some() {
+            return Err(DatabaseError::QueryExecutionFailed(format!(
+                "Query execution failed, error: {:?}",
+                result.data
+            )));
         }
+
+        let merkle_hash = result
+            .data
+            .get("value")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                DatabaseError::QueryExecutionFailed("Invalid result format".to_string())
+            })?;
+
+        // 2. Get actual value from store
+        let value = self.store.get(key).await?;
+        debug!(
+            "GET: Retrieved value from store: {:?}",
+            String::from_utf8_lossy(&value)
+        );
+
+        // 3. Verify hash matches
+        let mut hasher = Sha256::new();
+        hasher.update(&value);
+        let computed_hash = hex::encode(hasher.finalize());
+        debug!("GET: Computed hash of retrieved value: {}", computed_hash);
+
+        if computed_hash != merkle_hash {
+            return Err(DatabaseError::Store(StoreError::Storage(
+                "Value hash mismatch - data may be corrupted".to_string(),
+            )));
+        }
+
+        // Return the actual value
+        Ok(value)
     }
 
     #[instrument(skip(self, command))]
@@ -66,12 +169,17 @@ impl Database {
         &self.state
     }
 
+    #[instrument(skip(self))]
+    pub fn set_state(&mut self, state: Vec<u8>) {
+        self.state.clone_from(&state);
+    }
+
     #[instrument(skip(self, path))]
     pub fn save_state(&self, path: &Path) -> Result<(), DatabaseError> {
         debug!(path = ?path, "Saving database state");
-        fs::write(path, bincode::serialize(&self.state).unwrap()).map_err(|e| {
+        fs::write(path, &self.state).map_err(|e| {
             error!(error = ?e, "Failed to save state");
-            DatabaseError::QueryExecutionFailed(e.to_string())
+            DatabaseError::QueryExecutionFailed(format!("Failed to save state: {}", e))
         })
     }
 }
@@ -90,6 +198,8 @@ pub enum DatabaseError {
     ProofGenerationFailed(String),
     #[error("Proof verification failed: {0}")]
     ProofVerificationFailed(String),
+    #[error("Store error: {0}")]
+    Store(#[from] StoreError),
 }
 
 pub struct SP1Executor {
@@ -148,7 +258,10 @@ impl SP1Executor {
                 .run()
                 .map_err(|e| {
                     error!(error = ?e, "Query execution failed");
-                    DatabaseError::QueryExecutionFailed(e.to_string())
+                    DatabaseError::QueryExecutionFailed(format!(
+                        "Failed to execute query with proof: {}",
+                        e
+                    ))
                 })?;
             debug!("Query executed with proof");
 
@@ -163,7 +276,10 @@ impl SP1Executor {
             debug!("Executing query without proof");
             let (output, _) = self.client.execute(self.elf, stdin).run().map_err(|e| {
                 error!(error = ?e, "Query execution failed");
-                DatabaseError::QueryExecutionFailed(e.to_string())
+                DatabaseError::QueryExecutionFailed(format!(
+                    "Failed to execute query without proof: {}",
+                    e
+                ))
             })?;
             debug!("Query executed successfully");
             self.parse_output(output, None)
@@ -179,12 +295,12 @@ impl SP1Executor {
         debug!("Parsing query output");
         let output_str = String::from_utf8(output.to_vec()).map_err(|e| {
             error!(error = ?e, "Failed to parse output as UTF-8");
-            DatabaseError::QueryExecutionFailed(e.to_string())
+            DatabaseError::QueryExecutionFailed(format!("Failed to parse output as UTF-8: {}", e))
         })?;
 
         let output_json: serde_json::Value = serde_json::from_str(&output_str).map_err(|e| {
             error!(error = ?e, "Failed to parse output as JSON");
-            DatabaseError::QueryExecutionFailed(e.to_string())
+            DatabaseError::QueryExecutionFailed(format!("Failed to parse output as JSON: {}", e))
         })?;
 
         debug!(?output_json, "Parsed output JSON");

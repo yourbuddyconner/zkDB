@@ -56,6 +56,26 @@ Command-line interface built on top of zkdb-lib:
 - Helper methods
 - Common tools
 
+### zkdb-store
+
+A new crate for managing value storage:
+
+- Trait-based storage interface
+- Multiple backend implementations
+- Configurable storage policies
+- Example usage:
+  ```rust
+  let store = FileStore::new(config);
+  let location = store.put(key, value)?;
+  let value = store.get(key)?;
+  ```
+
+### Storage Backends
+
+1. FileStore
+   - Local filesystem storage
+   - Directory-based organization
+   - Optional compression
 ## Architecture Flow
 
 1. SP1 Program Development:
@@ -104,3 +124,107 @@ The project uses different dependencies for SP1 programs vs client code:
 - SP1 programs focus on computation logic
 - zkdb-lib handles all proof generation and verification
 - Proof artifacts are managed consistently across engines
+
+## Storage Architecture
+
+### Two-Layer Storage Design
+
+1. Merkle State Tree (MST)
+   - Stores key-value pairs where:
+     - Key: Original key from user
+     - Value: Hash of the actual data
+   - Handled by zkdb-merkle SP1 program
+   - Provides cryptographic proofs and consistency guarantees
+
+2. Value Store
+   - Stores actual data values
+   - Multiple backend options:
+     - Local filesystem
+   - Not part of the zero-knowledge proofs
+   - Configurable based on application needs
+
+### Data Flow
+
+Actors:
+- Database (Main client interface in zkdb-lib)
+- FileStore (Value storage backend in zkdb-store)
+- ProverClient (SP1 prover interface)
+- MerkleEngine (SP1 program implementation)
+- MerkleState (Merkle tree state in SP1 program)
+- Command (Cross-boundary message type)
+- QueryResult (Cross-boundary result type)
+- ProvenQueryResult (Proof-carrying result type)
+
+1. Write Operation:
+   ```mermaid
+   sequenceDiagram
+      participant Client
+      participant DB as Database
+      participant Store as FileStore
+      participant SP1 as ProverClient
+      participant Program as MerkleEngine
+      participant MST as MerkleState
+
+      %% Write Operation
+      Client->>DB: put(key, value)
+      
+      %% Store actual value first
+      DB->>Store: put(key, value)
+      Store-->>DB: ok
+      
+      %% Calculate hash and update Merkle tree
+      DB->>DB: hash = Sha256::digest(value)
+      DB->>SP1: execute(zkdb-merkle ELF, Command::Insert{key, hash})
+      
+      SP1->>Program: main(state, Command::Insert)
+      Program->>Program: deserialize_state()
+      Program->>MST: insert(key, hash)
+      MST-->>Program: ok
+      Program->>Program: serialize_state()
+      Program-->>SP1: QueryResult{data: {"inserted": true}, new_state}
+      
+      SP1-->>DB: QueryResult
+      DB-->>Client: ok
+   ```
+
+2. Get Operation:
+   ```mermaid
+   sequenceDiagram
+      participant Client
+      participant DB as Database
+      participant Store as FileStore
+      participant SP1 as ProverClient
+      participant Program as MerkleEngine
+      participant MST as MerkleState
+
+      Client->>DB: get(key)
+      DB->>SP1: execute(zkdb-merkle ELF, Command::Query)
+      SP1->>Program: main(state, Command::Query)
+      Program->>MST: query(key)
+      MST-->>Program: value_hash
+      Program-->>SP1: QueryResult{data, new_state}
+      SP1-->>DB: value_hash
+      DB->>Store: get(key)
+      Store-->>DB: value
+      DB->>DB: verify_hash(value, value_hash)
+      DB-->>Client: value_hash
+   ```
+
+3. Prove Operation:
+   ```mermaid
+   sequenceDiagram
+      participant Client
+      participant DB as Database
+      participant SP1 as ProverClient
+      participant Program as MerkleEngine
+      participant MST as MerkleState
+
+      Client->>DB: prove(key)
+      DB->>SP1: execute(zkdb-merkle ELF, Command::Prove)
+      SP1->>Program: main(state, Command::Prove)
+      Program->>MST: generate_proof(key)
+      MST-->>Program: proof
+      Program-->>SP1: QueryResult{proof, root}
+      SP1-->>DB: ProvenQueryResult
+      DB-->>Client: proof
+   ```

@@ -1,10 +1,10 @@
 [package]
-name = "zkdb_merkle"
+name = "zkdb-merkle"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "zkdb_merkle"
+name = "zkdb-merkle"
 path = "src/main.rs"
 
 [dependencies]
@@ -15,4 +15,4 @@ serde_json = { workspace = true, features = ["alloc"] }
 base64 = { workspace = true, features = ["alloc"] }
 hex = { workspace = true, features = ["alloc"] }
 bincode = { workspace = true }
-zkdb_core = { workspace = true }
+zkdb-core = { workspace = true }
