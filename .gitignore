@@ -17,3 +17,7 @@ pgo-data.profdata
 
 # Env
 .env
+
+elf
+elf/*
+**/*/db_state.bin

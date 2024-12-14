@@ -3,25 +3,23 @@
 //! Supports `insert`, `query`, and `prove` commands.
 //! State is managed by passing the Merkle tree in and out as serialized data.
 
-#![no_main]
-#![no_std]
+sp1_zkvm::entrypoint!(main);
 
 extern crate alloc;
 
-sp1_zkvm::entrypoint!(main);
-
-use crate::alloc::string::ToString;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
+use alloc::string::ToString;
 use alloc::vec::Vec;
-use rs_merkle::{algorithms::Sha256, Hasher, MerkleTree};
-use serde::ser::{SerializeSeq, Serializer};
+use rs_merkle::proof_serializers;
+use rs_merkle::{algorithms::Sha256, MerkleTree};
 use serde::{Deserialize, Serialize};
 use sp1_zkvm::io;
+use zkdb_core::{Command, DatabaseEngine, DatabaseError, QueryResult};
 
 /// Key-value pair type.
 type Key = String;
-type Value = String;
+// type Value = String;
 
 /// Serializable state of the Merkle tree.
 #[derive(Serialize, Deserialize)]
@@ -41,142 +39,132 @@ impl MerkleState {
     }
 }
 
-/// The main entry point for the SP1 program.
+pub struct MerkleEngine;
+
+impl DatabaseEngine for MerkleEngine {
+    fn execute_query(
+        &mut self,
+        state: &[u8],
+        command: &Command,
+    ) -> Result<QueryResult, DatabaseError> {
+        main_internal(state, command)
+    }
+}
+
 pub fn main() {
-    // Read input data: command and state.
-    let command_input: String = io::read();
+    let state: Vec<u8> = io::read::<Vec<u8>>();
+    let command: Command = io::read::<Command>();
 
-    // Parse the input (expecting JSON format).
-    let input: serde_json::Value =
-        serde_json::from_str(&command_input).expect("Invalid JSON input");
-
-    // Extract command and parameters.
-    let command = input
-        .get("command")
-        .expect("Missing command")
-        .as_str()
-        .expect("Invalid command");
-    let params = input.get("params").unwrap_or(&serde_json::Value::Null);
-    let state_data = input.get("state").and_then(|s| s.as_str());
-
-    // Deserialize state or create a new one.
-    let mut merkle_state = if let Some(state_str) = state_data {
-        let decoded = base64::decode(state_str).expect("Failed to decode state");
-        serde_json::from_slice(&decoded).expect("Failed to deserialize state")
-    } else {
-        MerkleState::new()
-    };
-
-    // Perform the requested command.
-    let result = match command {
-        "insert" => {
-            let key = params
-                .get("key")
-                .expect("Missing key")
-                .as_str()
-                .expect("Invalid key");
-            let value = params
-                .get("value")
-                .expect("Missing value")
-                .as_str()
-                .expect("Invalid value");
-            insert(&mut merkle_state, key.to_string(), value.to_string())
-        }
-        "query" => {
-            let key = params
-                .get("key")
-                .expect("Missing key")
-                .as_str()
-                .expect("Invalid key");
-            query(&merkle_state, key)
-        }
-        "prove" => {
-            let key = params
-                .get("key")
-                .expect("Missing key")
-                .as_str()
-                .expect("Invalid key");
-            prove(&merkle_state, key)
-        }
-        _ => Err("Unknown command".to_string()),
-    };
-
-    // Serialize updated state.
-    let serialized_state = serde_json::to_vec(&merkle_state).expect("Failed to serialize state");
-    let encoded_state = base64::encode(serialized_state);
-
-    // Prepare the output.
-    let output = serde_json::json!({
-        "result": result.unwrap_or_else(|e| serde_json::json!({"error": e})),
-        "state": encoded_state,
+    let result = main_internal(&state, &command).unwrap_or_else(|e| QueryResult {
+        data: serde_json::json!({
+            "error": {
+                "type": "QueryExecutionFailed",
+                "state_len": state.len(),
+                "details": format!("{:?}", e),
+            }
+        }),
+        new_state: state,
     });
 
-    // Write the result as public output.
-    let output_str = serde_json::to_string(&output).expect("Failed to serialize output");
-    sp1_zkvm::io::commit_slice(output_str.as_bytes());
+    let output = serde_json::to_vec(&result).expect("Failed to serialize output");
+    sp1_zkvm::io::commit_slice(&output);
+}
+
+fn main_internal(state: &[u8], command: &Command) -> Result<QueryResult, DatabaseError> {
+    // if the state is empty, initialize it
+    let mut merkle_state: MerkleState = if state.is_empty() {
+        MerkleState::new()
+    } else {
+        bincode::deserialize(state).map_err(|e| {
+            DatabaseError::QueryExecutionFailed(format!("Failed to deserialize state: {}", e))
+        })?
+    };
+
+    let result = match command {
+        Command::Insert { key, value } => insert(&mut merkle_state, key.clone(), value.clone())?,
+        Command::Query { key } => query(&merkle_state, key)?,
+        Command::Prove { key } => prove(&merkle_state, key)?,
+    };
+    Ok(result)
 }
 
 /// Inserts a new key-value pair into the Merkle tree.
-fn insert(state: &mut MerkleState, key: Key, value: Value) -> Result<serde_json::Value, String> {
-    // Hash the value.
-    let leaf = Sha256::hash(value.as_bytes());
-    // Insert into the tree.
+fn insert(
+    state: &mut MerkleState,
+    key: String,
+    value: String,
+) -> Result<QueryResult, DatabaseError> {
+    // Convert hex string back to bytes
+    let value_bytes = hex::decode(&value).map_err(|e| {
+        DatabaseError::QueryExecutionFailed(format!("Failed to decode hex value: {}", e))
+    })?;
+
+    // Convert to fixed size array for Merkle tree
+    let mut leaf = [0u8; 32];
+    leaf.copy_from_slice(&value_bytes);
+
+    // Insert into the tree
     state.leaves.push(leaf);
     let index = state.leaves.len() - 1;
-    state.key_indices.insert(key, index);
+    state.key_indices.insert(key.clone(), index);
 
-    Ok(serde_json::json!({"status": "inserted"}))
+    Ok(QueryResult {
+        data: serde_json::json!({
+            "key": key.clone(),
+            "value": value.clone(),
+            "index": index,
+            "leaf": value.clone(),
+            "inserted": true,
+        }),
+        new_state: bincode::serialize(&state).unwrap(),
+    })
 }
 
 /// Queries the value associated with a key.
-fn query(state: &MerkleState, key: &str) -> Result<serde_json::Value, String> {
+fn query(state: &MerkleState, key: &str) -> Result<QueryResult, DatabaseError> {
     if let Some(&index) = state.key_indices.get(key) {
         let value_hash = &state.leaves[index];
-        Ok(serde_json::json!({"value_hash": hex::encode(value_hash)}))
+        Ok(QueryResult {
+            data: serde_json::json!({
+                "key": key.to_string(),
+                "value": hex::encode(value_hash),
+                "index": index,
+                "leaf": hex::encode(value_hash),
+                "found": true,
+            }),
+            new_state: bincode::serialize(&state).unwrap(),
+        })
     } else {
-        Err("Key not found".to_string())
+        Err(DatabaseError::QueryExecutionFailed(
+            "Key not found".to_string(),
+        ))
     }
 }
 
-/// Generates a proof for a given key.
-fn prove(state: &MerkleState, key: &str) -> Result<serde_json::Value, String> {
+/// Generates a Merkle Inclusion Proof for a given key.
+fn prove(state: &MerkleState, key: &str) -> Result<QueryResult, DatabaseError> {
     if let Some(&index) = state.key_indices.get(key) {
-        // Create Merkle tree.
         let merkle_tree = MerkleTree::<Sha256>::from_leaves(&state.leaves);
-        // Generate proof.
         let proof = merkle_tree.proof(&[index]);
-        // Get the root.
-        let root = merkle_tree.root().ok_or("Tree is empty")?;
+        let root = merkle_tree
+            .root()
+            .ok_or_else(|| DatabaseError::QueryExecutionFailed("Tree is empty".to_string()))?;
 
-        // Custom serialization for MerkleProof
-        let proof_serialized =
-            serde_json::to_value(ProofWrapper(proof)).expect("Failed to serialize proof");
-        let proof_encoded = base64::encode(serde_json::to_string(&proof_serialized).unwrap());
+        let proof_serialized: Vec<u8> = proof.serialize::<proof_serializers::ReverseHashesOrder>();
+        let proof_encoded = base64::encode(proof_serialized);
 
-        Ok(serde_json::json!({
-            "root": hex::encode(root),
-            "proof": proof_encoded,
-            "indices": [index],
-            "leaf": hex::encode(state.leaves[index]),
-        }))
+        Ok(QueryResult {
+            data: serde_json::json!({
+                "root": hex::encode(root),
+                "proof": proof_encoded,
+                "index": index,
+                "leaf": hex::encode(state.leaves[index]),
+            }),
+            new_state: bincode::serialize(&state).unwrap(),
+        })
     } else {
-        Err("Key not found".to_string())
-    }
-}
-
-// Custom wrapper for MerkleProof serialization
-struct ProofWrapper(rs_merkle::MerkleProof<Sha256>);
-
-impl Serialize for ProofWrapper {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let proof_hashes = self.0.proof_hashes();
-        let mut seq = serializer.serialize_seq(Some(proof_hashes.len()))?;
-        for hash in proof_hashes {
-            seq.serialize_element(&hex::encode(hash))?;
-        }
-        seq.end()
+        Err(DatabaseError::QueryExecutionFailed(
+            "Key not found".to_string(),
+        ))
     }
 }

@@ -1,0 +1,19 @@
+[package]
+name = "zkdb-bench"
+version = "0.1.0"
+edition = "2021"
+
+[[bench]]
+name = "db_operations"
+harness = false
+
+[dependencies]
+zkdb-lib = { workspace = true }
+zkdb-store = { workspace = true }
+criterion = { version = "0.5", features = ["async_tokio"] }
+tokio = { version = "1.0", features = ["full"] }
+tempfile = "3.8"
+sha2 = { workspace = true }
+hex = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true } 
